@@ -328,7 +328,6 @@ def get_evento(request, evento_id):
                 
 def generar_reporte(request):
     eventos = evento_collection.find()
-    print("Hola  1",eventos)
     root = ET.Element("eventos")
 
     for evento in eventos:
