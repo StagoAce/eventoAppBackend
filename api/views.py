@@ -6,6 +6,10 @@ import json
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 from bson import ObjectId
+import xml.etree.ElementTree as ET
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from io import BytesIO
 
 # Create your views here.
 
@@ -322,7 +326,104 @@ def get_evento(request, evento_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
                 
-    
+def generar_reporte(request):
+    eventos = evento_collection.find()
+    print("Hola  1",eventos)
+    root = ET.Element("eventos")
+
+    for evento in eventos:
+        evento_elem = ET.SubElement(root, "evento")
+
+        # Añadir los campos del evento
+        ET.SubElement(evento_elem, "nombre").text = evento.get("nombre", "Sin Nombre")
+        ET.SubElement(evento_elem, "organizador").text = evento.get("organizador", "Desconocido")
+        ET.SubElement(evento_elem, "lugar").text = evento.get("lugar", "Desconocido")
+        ET.SubElement(evento_elem, "direccion").text = evento.get("direccion", "Desconocida")
+        
+        # Convertir las fechas a un formato legible
+        fecha_inicio = evento.get("fecha_inicio")
+        fecha_finalizacion = evento.get("fecha_finalizacion")
+        if fecha_inicio:
+            fecha_inicio = evento['fecha_inicio']
+            fecha_inicio_formateada = fecha_inicio.strftime("%Y-%m-%d %H:%M:%S")
+        if fecha_finalizacion:
+            fecha_finalizacion = evento['fecha_inicio']
+            fecha_finalizacion_formateada = fecha_finalizacion.strftime("%Y-%m-%d %H:%M:%S")
+        
+        ET.SubElement(evento_elem, "fecha_inicio").text = fecha_inicio_formateada if fecha_inicio_formateada else "Fecha no disponible"
+        ET.SubElement(evento_elem, "fecha_finalizacion").text = fecha_finalizacion_formateada if fecha_finalizacion_formateada else "Fecha no disponible"
+        
+        ET.SubElement(evento_elem, "descripcion").text = evento.get("descripcion", "Sin descripción")
+
+    # Crear el árbol XML
+    tree = ET.ElementTree(root)
+  
+    # Si el usuario solicita el reporte en formato Excel
+    if request.GET.get('format') == 'excel':
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Reporte de Eventos"
+        
+        headers = ["Nombre", "Organizador", "Lugar", "Dirección", "Fecha de Inicio", "Fecha de Finalización", "Descripción"]
+
+        # Estilo de encabezado (color de fondo y negrita)
+        header_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        header_font = Font(bold=True)
+
+        # Agregar encabezados y aplicar estilo
+        for col_num, header in enumerate(headers, start=1):
+            cell = sheet.cell(row=1, column=col_num)
+            cell.value = header
+            cell.fill = header_fill
+            cell.font = header_font
+
+
+        for evento in root.findall('evento'):
+            fila = [
+                evento.find("nombre").text,
+                evento.find("organizador").text,
+                evento.find("lugar").text,
+                evento.find("direccion").text,
+                evento.find("fecha_inicio").text,
+                evento.find("fecha_finalizacion").text,
+                evento.find("descripcion").text,
+            ]
+            sheet.append(fila)
+
+        # Ajustar el tamaño de las columnas según el contenido
+        for col in sheet.columns:
+            max_length = 0
+            column = col[0].column_letter  # Obtener la letra de la columna
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(cell.value)
+                except:
+                    pass
+            adjusted_width = (max_length + 2)
+            sheet.column_dimensions[column].width = adjusted_width
+
+        # Ajustar el texto para que no se desborde (ajustar el texto dentro de las celdas)
+        for row in sheet.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True)
+
+
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        
+        response = HttpResponse(
+            output,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = "attachment; filename=reporte_eventos.xlsx"
+        return response
+
+    # Si el usuario solicita el reporte en formato XML
+    response = HttpResponse(content_type='application/xml')
+    tree.write(response, encoding="unicode", xml_declaration=True)
+    return response    
 
         
     
